@@ -1,5 +1,6 @@
 import NIO
 import NIOConcurrencyHelpers
+import OSLog
 
 /// A DNS client that can be used to send queries to a DNS server.
 /// The client is thread-safe and can be used from multiple threads. Supports both UDP and TCP, and multicast DNS. This client is not a full implementation of the DNS protocol, but only supports the most common queries. If you need more advanced features, you should use the `sendQuery` method to send a custom query.
@@ -33,7 +34,16 @@ public final class DNSClient: Resolver, Sendable {
         self.dnsDecoder = context.decoder
     }
 
+    //@available(macOS 11.0, *)
+    @available(macOS 11.0, macCatalyst 14.0, *)
+    private static let log = Logger(subsystem: "DNSClient", category: "DNSClient")
+
     deinit {
+        if #available(macOS 11.0, macCatalyst 14.0, *) {
+            Self.log.warning("DNSClient deinitializing, closing channel. Primary address: \(self.primaryAddress.description)")
+        } else {
+            // Fallback on earlier versions
+        }
         _ = channel.close(mode: .all)
     }
 }
