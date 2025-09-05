@@ -203,4 +203,117 @@ final class DNSUDPClientTests: XCTestCase {
         
         XCTAssertEqual(domainname.description, "PTRRecord: dns.google")
     }
+    
+    func testClientReuseBehavior() {
+        //
+        // MARK: - Test 1: Standard NIO Client (dnsClient) - Should SUCCEED
+        //
+        print("\n--- Starting Test: Standard NIO Client (Should Succeed) ---")
+        let standardClientExpectation = self.expectation(description: "The second query on the standard NIO client should succeed")
+        
+        let firstQueryFuture = self.dnsClient.ipv4InverseAddress("8.8.8.8")
+        let secondQueryFuture = firstQueryFuture.flatMap { ptrRecords -> EventLoopFuture<[SocketAddress]> in
+            XCTAssertFalse(ptrRecords.isEmpty, "Standard NIO client: First query should succeed")
+            print("Test: Standard NIO client's first query succeeded. Starting second query...")
+            return self.dnsClient.initiateAQuery(host: "dns.google", port: 443)
+        }
+
+        secondQueryFuture.whenComplete { result in
+            switch result {
+            case .success(let aRecords):
+                XCTAssertFalse(aRecords.isEmpty, "Standard NIO client: Second query should also succeed")
+                print("Test: Standard NIO client's second query succeeded as expected.")
+                standardClientExpectation.fulfill()
+            case .failure(let error):
+                XCTFail("The standard NIO client's second query failed unexpectedly. Error: \(error)")
+            }
+            print("--- Finished Test: Standard NIO Client ---\n")
+        }
+
+        
+        #if canImport(Network)
+        //
+        // MARK: - Test 2: Transport Services Client (nwDnsClient) - Should FAIL
+        //
+        print("--- Starting Test: Transport Services Client (Should Fail) ---")
+        let transportServicesClientExpectation = self.expectation(description: "The second query on the Transport Services client should fail")
+
+        let firstTSQueryFuture = self.nwDnsClient.ipv4InverseAddress("8.8.8.8")
+        let secondTSQueryFuture = firstTSQueryFuture.flatMap { ptrRecords -> EventLoopFuture<[SocketAddress]> in
+            XCTAssertFalse(ptrRecords.isEmpty, "Transport Services client: First query should succeed")
+            print("Test: Transport Services client's first query succeeded. Starting second query...")
+            return self.nwDnsClient.initiateAQuery(host: "dns.google", port: 443)
+        }
+
+        secondTSQueryFuture.whenComplete { result in
+            switch result {
+                case .success(_): // let aRecords
+                XCTFail("The Transport Services client's second query succeeded, but it was expected to fail. The bug may be fixed.")
+            case .failure(let error):
+                print("Test: Transport Services client's second query failed as expected. Error: \(error)")
+                transportServicesClientExpectation.fulfill()
+            }
+            print("--- Finished Test: Transport Services Client ---\n")
+        }
+        #endif
+
+        
+        // Wait for all expectations to be fulfilled.
+        waitForExpectations(timeout: 35)
+    }
+
+    func testTSClientReuseScenarios() {
+        #if canImport(Network)
+        //
+        // MARK: - V2 Test 1: Generic A -> A Query (Should Fail)
+        //
+        print("\n--- Starting Test V2: A -> A on Transport Services Client (Should Fail) ---")
+        let expectation1 = self.expectation(description: "Second generic A query on TS client should fail")
+
+        let client = self.nwDnsClient!
+        let firstQuery = client.initiateAQuery(host: "iana.org", port: 443)
+        let secondQuery = firstQuery.flatMap { firstResult -> EventLoopFuture<[SocketAddress]> in
+            XCTAssertFalse(firstResult.isEmpty, "V2 Test 1: First A query should succeed.")
+            print("Test V2: First A query succeeded.")
+            return client.initiateAQuery(host: "icann.org", port: 443)
+        }
+
+        secondQuery.whenComplete { result in
+            switch result {
+            case .success:
+                XCTFail("V2 Test 1: Second A query succeeded unexpectedly.")
+            case .failure:
+                print("Test V2: Second A query failed as expected.")
+                expectation1.fulfill()
+            }
+            print("--- Finished Test V2: A -> A ---\n")
+        }
+
+        //
+        // MARK: - V2 Test 2: Raw PTR -> A Query (Should Fail)
+        //
+        print("--- Starting Test V2: Raw PTR -> A on Transport Services Client (Should Fail) ---")
+        let expectation2 = self.expectation(description: "Second query after raw PTR on TS client should fail")
+
+        let firstRawQuery = client.sendQuery(forHost: "8.8.8.8.in-addr.arpa", type: .ptr)
+        let secondAfterRawQuery = firstRawQuery.flatMap { firstResult -> EventLoopFuture<Message> in
+            XCTAssertFalse(firstResult.answers.isEmpty, "V2 Test 2: Raw PTR query should succeed.")
+            print("Test V2: Raw PTR query succeeded.")
+            return client.sendQuery(forHost: "dns.google", type: .a)
+        }
+
+        secondAfterRawQuery.whenComplete { result in
+            switch result {
+            case .success:
+                XCTFail("V2 Test 2: Second query after raw PTR succeeded unexpectedly.")
+            case .failure:
+                print("Test V2: Second query after raw PTR failed as expected.")
+                expectation2.fulfill()
+            }
+            print("--- Finished Test V2: Raw PTR -> A ---\n")
+        }
+        #endif
+
+        waitForExpectations(timeout: 35)
+    }
 }

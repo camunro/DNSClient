@@ -34,12 +34,11 @@ public final class DNSClient: Resolver, Sendable {
         self.dnsDecoder = context.decoder
     }
 
-    //@available(macOS 11.0, *)
-    @available(macOS 11.0, macCatalyst 14.0, *)
-    private static let log = Logger(subsystem: "DNSClient", category: "DNSClient")
+    @available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *)
+    static let log = Logger(subsystem: "DNSClient", category: "DNSClient")
 
     deinit {
-        if #available(macOS 11.0, macCatalyst 14.0, *) {
+        if #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, macCatalyst 14.0, *) {
             Self.log.warning("DNSClient deinitializing, closing channel. Primary address: \(self.primaryAddress.description)")
         } else {
             // Fallback on earlier versions

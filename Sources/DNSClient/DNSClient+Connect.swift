@@ -182,6 +182,39 @@ fileprivate extension Array where Element == SocketAddress {
 #if canImport(Network)
 import NIOTransportServices
 
+final class TSChannelLifecycleProbe: ChannelInboundHandler {
+    typealias InboundIn = ByteBuffer
+    private let tag: String
+    
+    init(tag: String) { self.tag = tag }
+    
+    func handlerAdded(context: ChannelHandlerContext) {
+        print("[TSProbe \(tag)] handlerAdded")
+    }
+    func channelActive(context: ChannelHandlerContext) {
+        print("[TSProbe \(tag)] channelActive")
+        context.fireChannelActive()
+    }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let buf = self.unwrapInboundIn(data)
+        print("[TSProbe \(tag)] channelRead bytes=\(buf.readableBytes)")
+        context.fireChannelRead(data)
+    }
+    func channelReadComplete(context: ChannelHandlerContext) {
+        print("[TSProbe \(tag)] channelReadComplete")
+        context.fireChannelReadComplete()
+    }
+    func channelInactive(context: ChannelHandlerContext) {
+        print("[TSProbe \(tag)] channelInactive")
+        raise(SIGTRAP)                                    // <- force debugger break
+        context.fireChannelInactive()
+    }
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        print("[TSProbe \(tag)] errorCaught: \(error)")
+        context.fireErrorCaught(error)
+    }
+}
+
 @available(iOS 12, *)
 extension DNSClient {
     public static func connectTS(on group: NIOTSEventLoopGroup, host: String) -> EventLoopFuture<DNSClient> {
@@ -211,7 +244,13 @@ extension DNSClient {
         let dnsDecoder = DNSDecoder(group: group)
         
         return NIOTSDatagramBootstrap(group: group).channelInitializer { channel in
-            return channel.pipeline.addHandlers(dnsDecoder, DNSEncoder())
+             return channel.pipeline.addHandlers(dnsDecoder, DNSEncoder())
+//            return channel.pipeline.addHandlers(
+//                TSChannelLifecycleProbe(tag: "pre-decoder"),
+//                dnsDecoder,
+//                TSChannelLifecycleProbe(tag: "post-decoder"),
+//                DNSEncoder()
+//            )
         }
         .connect(host: ipAddress, port: port)
         .map { channel -> DNSClient in
@@ -220,6 +259,13 @@ extension DNSClient {
                 address: address,
                 decoder: dnsDecoder
             )
+
+            if #available(macOS 11.0, iOS 14.0, *) {
+                channel.closeFuture.whenComplete { result in
+                    DNSClient.log.error("connect.map Channel closed! Result: \(String(describing: result))")
+                    raise(SIGTRAP) // <- force debugger break, use bt in LLDB to inspect the stack.
+                }
+            }
 
             dnsDecoder.mainClient = client
             return client

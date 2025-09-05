@@ -143,6 +143,9 @@ extension DNSClient {
         
         return loop.flatSubmit {
             // Register in-flight
+            if #available(macOS 11.0, iOS 14.0, *) {
+                Self.log.debug("Sending query for ID \(message.header.id)")
+            }
             self.dnsDecoder.messageCache.withLockedValue { cache in
                 cache[message.header.id] = SentQuery(message: message, promise: promise)
             }
