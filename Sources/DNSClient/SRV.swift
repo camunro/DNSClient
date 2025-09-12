@@ -86,11 +86,11 @@ public func rfc2782Order<RNG: RandomNumberGenerator>(_ entries: [SRVEntry], rng:
             let chosenIndex: Int
             if totalWeight == 0 {
                 // RFC 2782: if all weights are zero, select uniformly at random.
-                chosenIndex = Int.random(in: 0 ..< pool.count, using: &rng)
+                chosenIndex = randomBelow(pool.count, using: &rng)
             } else {
                 // Pick a random number R in [0, totalWeight - 1] and select the first
                 // record whose cumulative weight exceeds R.
-                var r = Int.random(in: 0 ..< totalWeight, using: &rng)
+                var r = randomBelow(totalWeight, using: &rng)
                 var i = 0
                 while i < pool.count {
                     r -= max(0, pool[i].weight)
@@ -139,3 +139,12 @@ public func rfc2782Order(_ entries: [SRVEntry]) -> [SRVEntry] {
 //    _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net service = 0 0 1026 pl-0-us-east-1-k45tj.mongodb.net.
 //    _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net service = 0 0 1024 pl-0-us-east-1-k45tj.mongodb.net.
 //    _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net service = 0 0 1025 pl-0-us-east-1-k45tj.mongodb.net.
+@inline(__always)
+private func randomBelow<RNG: RandomNumberGenerator>(_ upper: Int, using rng: inout RNG) -> Int {
+    precondition(upper > 0)
+    let u = UInt64(upper)
+    let r = rng.next()
+    // Use high 64-bits of 128-bit product for unbiased scaling without loops.
+    let scaled = r.multipliedFullWidth(by: u).high
+    return Int(truncatingIfNeeded: scaled)
+}
