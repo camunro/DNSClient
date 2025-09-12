@@ -70,7 +70,7 @@ public struct SRVEntry: Sendable {
 /// - Returns: compliant to RFC2782 ordering requirements [SRVEntry]
 /// - Complexity: O(n^2) per priority group is fine for typical SRV set sizes.
 
-public func rfc2782Order(_ entries: [SRVEntry], rng: inout any RandomNumberGenerator) -> [SRVEntry] {
+public func rfc2782Order<RNG: RandomNumberGenerator>(_ entries: [SRVEntry], rng: inout RNG) -> [SRVEntry] {
     // Group by priority (lowest first), RFC 2782 §3
     let byPriority = Dictionary(grouping: entries, by: { $0.priority }).sorted { $0.key < $1.key }
 
@@ -109,7 +109,7 @@ public func rfc2782Order(_ entries: [SRVEntry], rng: inout any RandomNumberGener
 
 // Convenience overload with system RNG
 public func rfc2782Order(_ entries: [SRVEntry]) -> [SRVEntry] {
-    var rng: any RandomNumberGenerator = SystemRandomNumberGenerator()
+    var rng = SystemRandomNumberGenerator()
     return rfc2782Order(entries, rng: &rng)
 }
 
