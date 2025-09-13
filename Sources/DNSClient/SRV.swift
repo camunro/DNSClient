@@ -1,3 +1,4 @@
+import Foundation
 import NIO
 
 /// A DNS SRV record. This is used to specify the location of a service.
@@ -35,8 +36,6 @@ public struct SRVRecord: DNSResource {
     }
 }
 
-import Foundation
-
 // MARK: - RFC 2782 ordering for DNSClient ResourceRecord<SRVRecord>
 
 /// RFC 2782 ordering directly on DNSClient's SRV resource records.
@@ -56,14 +55,14 @@ public func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecord<
             if totalWeight == 0 {
                 chosenIndex = randomBelow(pool.count, using: &rng)
             } else {
-                var r = randomBelow(totalWeight, using: &rng)
-                var i = 0
-                while i < pool.count {
-                    r -= max(0, Int(pool[i].resource.weight))
-                    if r < 0 { break }
-                    i += 1
+                var threshold = randomBelow(totalWeight, using: &rng)
+                var index = 0
+                while index < pool.count {
+                    threshold -= max(0, Int(pool[index].resource.weight))
+                    if threshold < 0 { break }
+                    index += 1
                 }
-                chosenIndex = min(i, pool.count - 1)
+                chosenIndex = min(index, pool.count - 1)
             }
             result.append(pool.remove(at: chosenIndex))
         }
@@ -80,10 +79,10 @@ public func rfc2782Order(_ records: [ResourceRecord<SRVRecord>]) -> [ResourceRec
 @inline(__always)
 private func randomBelow<RNG: RandomNumberGenerator>(_ upper: Int, using rng: inout RNG) -> Int {
     precondition(upper > 0)
-    let u = UInt64(upper)
-    let r = rng.next()
+    let upperU64 = UInt64(upper)
+    let randomValue = rng.next()
     // Use high 64-bits of 128-bit product for unbiased scaling without loops.
-    let scaled = r.multipliedFullWidth(by: u).high
+    let scaled = randomValue.multipliedFullWidth(by: upperU64).high
     return Int(truncatingIfNeeded: scaled)
 }
 
