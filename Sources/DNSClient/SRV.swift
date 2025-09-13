@@ -1,4 +1,3 @@
-// import Foundation
 import NIO
 
 /// A DNS SRV record. This is used to specify the location of a service.
