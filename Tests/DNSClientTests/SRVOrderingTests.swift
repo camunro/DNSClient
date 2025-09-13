@@ -11,19 +11,24 @@ private func labels(_ parts: [String]) -> [DNSLabel] {
     parts.map { DNSLabel(stringLiteral: $0) }
 }
 
-final class SRVEntryOrderingTests: XCTestCase {
+final class SRVOrderingTests: XCTestCase {
     func testPriorityOrdering() {
         // Mixed priorities; lower priority (0) must come first regardless of weights.
-        let entries: [SRVEntry] = [
-            .init(priority: 10, weight: 1, port: 1, target: "hi1"),
-            .init(priority: 0,  weight: 1, port: 1, target: "lo1"),
-            .init(priority: 10, weight: 1, port: 1, target: "hi2"),
-            .init(priority: 0,  weight: 1, port: 1, target: "lo2"),
+        let owner = labels(["service", "_tcp", "example", "com", ""]) // arbitrary
+        func rec(priority: UInt16, weight: UInt16, target: String) -> ResourceRecord<SRVRecord> {
+            let r = SRVRecord(priority: priority, weight: weight, port: 1, domainName: labels([target, "example", "com", ""]))
+            return ResourceRecord(domainName: owner, dataType: 33, dataClass: 1, ttl: 60, resource: r)
+        }
+        let records: [ResourceRecord<SRVRecord>] = [
+            rec(priority: 10, weight: 1, target: "hi1"),
+            rec(priority: 0,  weight: 1, target: "lo1"),
+            rec(priority: 10, weight: 1, target: "hi2"),
+            rec(priority: 0,  weight: 1, target: "lo2"),
         ]
 
         var rng = ZeroRNG()
-        let ordered = rfc2782Order(entries, rng: &rng)
-        let priorities = ordered.map { $0.priority }
+        let ordered = rfc2782Order(records, rng: &rng)
+        let priorities = ordered.map { Int($0.resource.priority) }
 
         // Expect all 0s before any 10s.
         XCTAssertEqual(priorities.prefix(2), [0, 0])
@@ -32,43 +37,41 @@ final class SRVEntryOrderingTests: XCTestCase {
 
     func testWeightedSelectionPrefersHigherWeightFirst() {
         // Same priority, weights: 0, 5, 0. With ZeroRNG, the first choice should be the weight=5 entry.
-        let entries: [SRVEntry] = [
-            .init(priority: 0, weight: 0, port: 1, target: "a"),
-            .init(priority: 0, weight: 5, port: 1, target: "b"),
-            .init(priority: 0, weight: 0, port: 1, target: "c"),
+        let owner = labels(["service", "_tcp", "example", "com", ""]) // arbitrary
+        func rec(weight: UInt16, target: String) -> ResourceRecord<SRVRecord> {
+            let r = SRVRecord(priority: 0, weight: weight, port: 1, domainName: labels([target, "example", "com", ""]))
+            return ResourceRecord(domainName: owner, dataType: 33, dataClass: 1, ttl: 60, resource: r)
+        }
+        let records: [ResourceRecord<SRVRecord>] = [
+            rec(weight: 0, target: "a"),
+            rec(weight: 5, target: "b"),
+            rec(weight: 0, target: "c"),
         ]
 
         var rng = ZeroRNG()
-        let ordered = rfc2782Order(entries, rng: &rng)
-        XCTAssertEqual(ordered.first?.target, "b")
+        let ordered = rfc2782Order(records, rng: &rng)
+        XCTAssertEqual(ordered.first?.resource.domainName.string, "b.example.com")
     }
 
     func testAllZeroWeightsProducesPermutation() {
         // All zero weights: selection is uniform random; with ZeroRNG it will pick index 0 repeatedly.
-        let entries: [SRVEntry] = [
-            .init(priority: 0, weight: 0, port: 1, target: "a"),
-            .init(priority: 0, weight: 0, port: 1, target: "b"),
-            .init(priority: 0, weight: 0, port: 1, target: "c"),
+        let owner = labels(["service", "_tcp", "example", "com", ""]) // arbitrary
+        func rec(target: String) -> ResourceRecord<SRVRecord> {
+            let r = SRVRecord(priority: 0, weight: 0, port: 1, domainName: labels([target, "example", "com", ""]))
+            return ResourceRecord(domainName: owner, dataType: 33, dataClass: 1, ttl: 60, resource: r)
+        }
+        let records: [ResourceRecord<SRVRecord>] = [
+            rec(target: "a"),
+            rec(target: "b"),
+            rec(target: "c"),
         ]
 
         var rng = ZeroRNG()
-        let ordered = rfc2782Order(entries, rng: &rng)
+        let ordered = rfc2782Order(records, rng: &rng)
 
         // Verify it's a permutation of inputs.
-        XCTAssertEqual(Set(entries.map { $0.target }), Set(ordered.map { $0.target }))
-        XCTAssertEqual(entries.count, ordered.count)
-    }
-
-    func testNegativeWeightsTreatedAsZero() {
-        // Negative weight should be treated as zero by implementation (max(0, weight)).
-        let entries: [SRVEntry] = [
-            .init(priority: 0, weight: -5, port: 1, target: "neg"),
-            .init(priority: 0, weight:  1, port: 1, target: "pos"),
-        ]
-
-        var rng = ZeroRNG()
-        let ordered = rfc2782Order(entries, rng: &rng)
-        XCTAssertEqual(ordered.first?.target, "pos")
+        XCTAssertEqual(Set(records.map { $0.resource.domainName.string }), Set(ordered.map { $0.resource.domainName.string }))
+        XCTAssertEqual(records.count, ordered.count)
     }
 }
 
