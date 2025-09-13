@@ -39,7 +39,7 @@ public struct SRVRecord: DNSResource {
 // MARK: - RFC 2782 ordering for DNSClient ResourceRecord<SRVRecord>
 
 /// RFC 2782 ordering directly on DNSClient's SRV resource records.
-///
+/// 
 /// Implements RFC 2782 Section 3 (Selection of SRV RR):
 /// - Partition records by `priority` and process priorities in ascending order.
 /// - For a given priority group, repeat until the group is empty:
@@ -48,9 +48,16 @@ public struct SRVRecord: DNSResource {
 ///   - Else, choose a random number R in [0, S-1] and walk the set subtracting
 ///     each record's weight from R until R < 0; select that record.
 ///   - Remove the selected record from the group and continue.
-///
+/// 
 /// The resulting concatenation of all groups is the recommended connection
 /// attempt order for the client.
+///
+/// - Parameters:
+///   - records: The SRV resource records to order.
+///   - rng: The random number generator used for the weighted selection within
+///          a priority group.
+/// - Returns: The input records ordered according to RFC 2782 selection rules.
+/// - Complexity: O(n²) per priority group, suitable for typical SRV set sizes.
 internal func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecord<SRVRecord>], rng: inout RNG) -> [ResourceRecord<SRVRecord>] {
     // Group by priority (lowest first)
     let byPriority = Dictionary(grouping: records, by: { Int($0.resource.priority) }).sorted { $0.key < $1.key }
@@ -84,7 +91,10 @@ internal func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecor
     return result
 }
 
-/// Convenience overload using SystemRandomNumberGenerator.
+/// Convenience overload using `SystemRandomNumberGenerator`.
+///
+/// - Parameter records: The SRV resource records to order.
+/// - Returns: The input records ordered according to RFC 2782 selection rules.
 internal func rfc2782Order(_ records: [ResourceRecord<SRVRecord>]) -> [ResourceRecord<SRVRecord>] {
     var rng = SystemRandomNumberGenerator()
     return rfc2782Order(records, rng: &rng)
@@ -103,22 +113,42 @@ private func randomBelow<RNG: RandomNumberGenerator>(_ upper: Int, using rng: in
 // MARK: - Array conveniences for RFC 2782 ordering
 
 extension Array where Element == ResourceRecord<SRVRecord> {
-    /// Return a new array ordered per RFC 2782 (priority grouping + weighted selection).
+    /// Returns a new array ordered per RFC 2782.
+    ///
+    /// The result is grouped by ascending `priority`; within a priority group,
+    /// elements are ordered using weighted random selection. This overload uses
+    /// `SystemRandomNumberGenerator` for the weighted selection.
+    /// - Returns: A new array ordered according to RFC 2782 selection rules.
     public func rfc2782Ordered() -> [Element] {
         rfc2782Order(self)
     }
 
-    /// Return a new array ordered per RFC 2782 using the provided RNG.
+    /// Returns a new array ordered per RFC 2782 using the provided RNG.
+    ///
+    /// The result is grouped by ascending `priority`; within a priority group,
+    /// elements are ordered using weighted random selection.
+    /// - Parameter rng: The random number generator used for weighted selection.
+    ///                  The generator's state will be advanced.
+    /// - Returns: A new array ordered according to RFC 2782 selection rules.
     public func rfc2782Ordered<RNG: RandomNumberGenerator>(rng: inout RNG) -> [Element] {
         rfc2782Order(self, rng: &rng)
     }
 
-    /// In-place RFC 2782 ordering (priority grouping + weighted selection).
+    /// Orders this array in place per RFC 2782.
+    ///
+    /// The elements are grouped by ascending `priority`; within a priority group,
+    /// elements are ordered using weighted random selection. This overload uses
+    /// `SystemRandomNumberGenerator` for the weighted selection.
     public mutating func rfc2782OrderInPlace() {
         self = rfc2782Order(self)
     }
 
-    /// In-place RFC 2782 ordering using the provided RNG.
+    /// Orders this array in place per RFC 2782 using the provided RNG.
+    ///
+    /// The elements are grouped by ascending `priority`; within a priority group,
+    /// elements are ordered using weighted random selection.
+    /// - Parameter rng: The random number generator used for weighted selection.
+    ///                  The generator's state will be advanced.
     public mutating func rfc2782OrderInPlace<RNG: RandomNumberGenerator>(rng: inout RNG) {
         self = rfc2782Order(self, rng: &rng)
     }
@@ -127,13 +157,23 @@ extension Array where Element == ResourceRecord<SRVRecord> {
 // MARK: - EventLoopFuture convenience
 
 extension EventLoopFuture where Value == [ResourceRecord<SRVRecord>] {
-    /// Map to RFC 2782–ordered results.
+    /// Maps this future to RFC 2782–ordered results.
+    ///
+    /// The mapped value is grouped by ascending `priority`; within a priority group,
+    /// elements are ordered using weighted random selection. This overload uses
+    /// `SystemRandomNumberGenerator` for the weighted selection.
     public func rfc2782Ordered() -> EventLoopFuture<Value> {
         self.map { records in rfc2782Order(records) }
     }
 
-    /// Map to RFC 2782–ordered results using the provided RNG.
-    /// Note: The RNG is copied into the closure; its external state will not be updated.
+    /// Maps this future to RFC 2782–ordered results using the provided RNG.
+    ///
+    /// The mapping groups by ascending `priority` and applies weighted selection within
+    /// each priority group. The `rng` is copied into the closure that performs the mapping;
+    /// its external state will not be updated.
+    /// - Parameter rng: The random number generator used for weighted selection. It is
+    ///                  copied for use inside the closure.
+    /// - Returns: A future that succeeds with RFC 2782–ordered records.
     public func rfc2782Ordered<RNG: RandomNumberGenerator>(rng: inout RNG) -> EventLoopFuture<Value> {
         var rngCopy = rng
         return self.map { records in
