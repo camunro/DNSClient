@@ -1,4 +1,4 @@
-import Foundation
+// import Foundation
 import NIO
 
 /// A DNS SRV record. This is used to specify the location of a service.
@@ -42,7 +42,7 @@ public struct SRVRecord: DNSResource {
 ///
 /// - Processes records by ascending `priority` (lower first).
 /// - Within the same priority, performs weighted-random selection until exhausted.
-public func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecord<SRVRecord>], rng: inout RNG) -> [ResourceRecord<SRVRecord>] {
+internal func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecord<SRVRecord>], rng: inout RNG) -> [ResourceRecord<SRVRecord>] {
     // Group by priority (lowest first)
     let byPriority = Dictionary(grouping: records, by: { Int($0.resource.priority) }).sorted { $0.key < $1.key }
 
@@ -71,7 +71,7 @@ public func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecord<
 }
 
 /// Convenience overload using SystemRandomNumberGenerator.
-public func rfc2782Order(_ records: [ResourceRecord<SRVRecord>]) -> [ResourceRecord<SRVRecord>] {
+internal func rfc2782Order(_ records: [ResourceRecord<SRVRecord>]) -> [ResourceRecord<SRVRecord>] {
     var rng = SystemRandomNumberGenerator()
     return rfc2782Order(records, rng: &rng)
 }
@@ -86,22 +86,45 @@ private func randomBelow<RNG: RandomNumberGenerator>(_ upper: Int, using rng: in
     return Int(truncatingIfNeeded: scaled)
 }
 
-//    // Example usage:
-//    // let srvRRs: [ResourceRecord<SRVRecord>] = ...
-//    // let ordered = rfc2782Order(srvRRs)
-//    // for rr in ordered { ... attempt connect to rr.resource.domainName ... }
+// MARK: - Array conveniences for RFC 2782 ordering
 
+extension Array where Element == ResourceRecord<SRVRecord> {
+    /// Return a new array ordered per RFC 2782 (priority grouping + weighted selection).
+    public func rfc2782Ordered() -> [Element] {
+        rfc2782Order(self)
+    }
 
-//    # Multiple SRV answers (client-to-server XMPP)
-//    dig +short _xmpp-client._tcp.jabber.org SRV           # expect 2+ lines (targets may change)
-//
-//    # MongoDB Atlas (replace with your cluster)
-//    nslookup -type=SRV _mongodb._tcp.<your-cluster>.mongodb.net
-//
-//    # SIP examples vary by provider; illustrative:
-//    host -t SRV _sip._tls.<your-sip-domain>
+    /// Return a new array ordered per RFC 2782 using the provided RNG.
+    public func rfc2782Ordered<RNG: RandomNumberGenerator>(rng: inout RNG) -> [Element] {
+        rfc2782Order(self, rng: &rng)
+    }
 
-//    nslookup -type=SRV _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net
-//    _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net service = 0 0 1026 pl-0-us-east-1-k45tj.mongodb.net.
-//    _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net service = 0 0 1024 pl-0-us-east-1-k45tj.mongodb.net.
-//    _mongodb._tcp.cluster0-pl-0-k45tj.mongodb.net service = 0 0 1025 pl-0-us-east-1-k45tj.mongodb.net.
+    /// In-place RFC 2782 ordering (priority grouping + weighted selection).
+    public mutating func rfc2782OrderInPlace() {
+        self = rfc2782Order(self)
+    }
+
+    /// In-place RFC 2782 ordering using the provided RNG.
+    public mutating func rfc2782OrderInPlace<RNG: RandomNumberGenerator>(rng: inout RNG) {
+        self = rfc2782Order(self, rng: &rng)
+    }
+}
+
+// MARK: - EventLoopFuture convenience
+
+extension EventLoopFuture where Value == [ResourceRecord<SRVRecord>] {
+    /// Map to RFC 2782–ordered results.
+    public func rfc2782Ordered() -> EventLoopFuture<Value> {
+        self.map { records in rfc2782Order(records) }
+    }
+
+    /// Map to RFC 2782–ordered results using the provided RNG.
+    /// Note: The RNG is copied into the closure; its external state will not be updated.
+    public func rfc2782Ordered<RNG: RandomNumberGenerator>(rng: inout RNG) -> EventLoopFuture<Value> {
+        var rngCopy = rng
+        return self.map { records in
+            var localRng = rngCopy
+            return rfc2782Order(records, rng: &localRng)
+        }
+    }
+}
