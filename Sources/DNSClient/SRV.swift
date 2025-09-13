@@ -40,21 +40,35 @@ public struct SRVRecord: DNSResource {
 
 /// RFC 2782 ordering directly on DNSClient's SRV resource records.
 ///
-/// - Processes records by ascending `priority` (lower first).
-/// - Within the same priority, performs weighted-random selection until exhausted.
+/// Implements RFC 2782 Section 3 (Selection of SRV RR):
+/// - Partition records by `priority` and process priorities in ascending order.
+/// - For a given priority group, repeat until the group is empty:
+///   - Let S be the sum of all `weight` values (weights ≤ 0 are treated as 0).
+///   - If S == 0, select one record uniformly at random from the remaining set.
+///   - Else, choose a random number R in [0, S-1] and walk the set subtracting
+///     each record's weight from R until R < 0; select that record.
+///   - Remove the selected record from the group and continue.
+///
+/// The resulting concatenation of all groups is the recommended connection
+/// attempt order for the client.
 internal func rfc2782Order<RNG: RandomNumberGenerator>(_ records: [ResourceRecord<SRVRecord>], rng: inout RNG) -> [ResourceRecord<SRVRecord>] {
     // Group by priority (lowest first)
     let byPriority = Dictionary(grouping: records, by: { Int($0.resource.priority) }).sorted { $0.key < $1.key }
 
     var result: [ResourceRecord<SRVRecord>] = []
     for (_, group) in byPriority {
+        // Work on a mutable copy of this priority group.
         var pool = group
+        // Repeatedly select one target by weight until the group is exhausted.
         while !pool.isEmpty {
+            // Recompute S (sum of weights) after each removal, per RFC.
             let totalWeight = pool.reduce(0) { $0 + max(0, Int($1.resource.weight)) }
             let chosenIndex: Int
             if totalWeight == 0 {
+                // All weights are zero: uniform random choice among remaining records.
                 chosenIndex = randomBelow(pool.count, using: &rng)
             } else {
+                // Draw R in [0, S-1] and walk the list until cumulative weight exceeds R.
                 var threshold = randomBelow(totalWeight, using: &rng)
                 var index = 0
                 while index < pool.count {
