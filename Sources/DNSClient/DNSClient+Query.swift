@@ -170,20 +170,22 @@ extension DNSClient {
         }
     }
     
-    /// Request SRV records from a host
+    /// Request SRV records from a host.
+    ///
+    /// Applies RFC 2782 selection ordering: records are grouped by ascending priority
+    /// and, within the same priority, ordered via weighted selection.
+    /// The returned array is the order in which a client should attempt connections.
     ///
     /// - parameters:
     ///     - host: Hostname to get the records from
-    /// - returns: A future with the resource record
+    /// - returns: A future with the RFC 2782–ordered resource records
     public func getSRVRecords(from host: String) -> EventLoopFuture<[ResourceRecord<SRVRecord>]> {
         return self.sendQuery(forHost: host, type: .srv).map { message in
-            return message.answers.compactMap { answer in
-                guard case .srv(let record) = answer else {
-                    return nil
-                }
-
+            let records: [ResourceRecord<SRVRecord>] = message.answers.compactMap { answer in
+                guard case .srv(let record) = answer else { return nil }
                 return record
             }
+            return rfc2782Order(records)
         }
     }
 
